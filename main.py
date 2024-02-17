@@ -5,25 +5,21 @@ import sys
 from datetime import datetime
 from pdfminer.high_level import extract_text
 from pdfminer.layout import LAParams
-from pdfminer.pdfpage import PDFPage
 
 
-def extract_text_from_page(pdf_path, page_number):
+def extract_text_from_pdf(pdf_path):
     with open(pdf_path, "rb") as file:
-        for page in PDFPage.get_pages(
-            file, pagenos=[page_number - 1], check_extractable=True
-        ):
-            return extract_text(
-                file, laparams=LAParams(), page_numbers=[page_number - 1]
-            )
+        return extract_text(file, laparams=LAParams())
 
 
 def is_header_line(line):
-    header_keywords = ["Date", "Description", "Amount"]
+    header_keywords = ["Date", "Description", "Amount", "Transaction description"]
     return any(keyword in line for keyword in header_keywords)
 
 
 def extract_table_data(extracted_text, table_title):
+    if table_title not in extracted_text:
+        return []
     date_pattern = re.compile(r"\d{2}/\d{2}/\d{2}")
     capturing = False
     records = []
@@ -32,10 +28,13 @@ def extract_table_data(extracted_text, table_title):
     curr_temp_record = 0
 
     lines = [line for line in extracted_text.split("\n") if line.strip()]
-    lines = lines[lines.index(table_title) :]
 
     for i, line in enumerate(lines):
-        if table_title in line:
+        if table_title == "Transaction description":
+            if "Date" in line and i < len(lines) - 1 and table_title in lines[i + 1]:
+                capturing = True
+                continue
+        elif i < len(lines) - 1 and table_title in line and lines[i + 1] == "Date":
             capturing = True
             continue
 
@@ -73,6 +72,7 @@ def extract_table_data(extracted_text, table_title):
 
 
 def extract_amounts(extracted_text, start_keyword="Amount"):
+    valid_amount_pattern = re.compile(r"-?\d+\.\d{2}")  # Pattern for valid amounts
     lines = [line for line in extracted_text.split("\n") if line.strip()]
     amounts_lists = []
     current_list = []
@@ -80,15 +80,24 @@ def extract_amounts(extracted_text, start_keyword="Amount"):
 
     for line in lines:
         if start_keyword in line:
-            if capturing:
+            if capturing and current_list:
+                # Append the current list to amounts_lists before starting a new one
                 amounts_lists.append(current_list)
                 current_list = []
             capturing = True
             continue
 
         if capturing:
-            current_list.append(line)
+            if valid_amount_pattern.match(line.strip()):
+                current_list.append(line)
+            else:
+                # Stop capturing and append the current list if it has elements
+                if current_list:
+                    amounts_lists.append(current_list)
+                    current_list = []
+                capturing = False
 
+    # Append the last list if it hasn't been appended yet
     if current_list:
         amounts_lists.append(current_list)
 
@@ -102,20 +111,35 @@ def parse_date(d):
 def process_pdf_files(directory):
     aggregated_deposits_records = []
     aggregated_withdrawals_records = []
+    fees = []
 
     for filename in os.listdir(directory):
         if filename.endswith(".pdf"):
             pdf_path = os.path.join(directory, filename)
-            extracted_text = extract_text_from_page(pdf_path, 3)
-
+            extracted_text = extract_text_from_pdf(pdf_path)
             deposits_records = extract_table_data(
                 extracted_text, "Deposits and other credits"
             )
             withdrawals_records = extract_table_data(
                 extracted_text, "Withdrawals and other debits"
             )
+            withdrawals_records_cont = extract_table_data(
+                extracted_text, "Withdrawals and other debits - continued"
+            )
+            deposits_records_cont = extract_table_data(
+                extracted_text, "Deposits and other credits - continued"
+            )
 
-            deposits_amounts, withdrawals_amounts = extract_amounts(extracted_text)
+            withdrawals_records += withdrawals_records_cont
+            deposits_records += deposits_records_cont
+
+            fee_records = extract_table_data(extracted_text, "Transaction description")
+            amounts = extract_amounts(extracted_text)
+            if len(amounts) == 3:
+                deposits_amounts, withdrawals_amounts, fee_amounts = amounts
+            else:
+                print("Error parsing pdf")
+                sys.exit()
 
             for i, record in enumerate(deposits_records):
                 if i < len(deposits_amounts):
@@ -129,9 +153,19 @@ def process_pdf_files(directory):
                 else:
                     break
 
+            for i, record in enumerate(fee_records):
+                if i < len(fee_amounts):
+                    record["amount"] = fee_amounts[i]
+                else:
+                    break
+
             aggregated_deposits_records.extend(deposits_records)
             aggregated_withdrawals_records.extend(withdrawals_records)
-    merged_records = aggregated_deposits_records + aggregated_withdrawals_records
+            fees.extend(fee_records)
+
+    merged_records = (
+        aggregated_deposits_records + aggregated_withdrawals_records + fee_records
+    )
     return sorted(merged_records, key=parse_date)
 
 
@@ -139,13 +173,15 @@ def write_to_csv(records, filename):
     with open(filename, "w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(["Date", "Description", "Amount"])
+
         for record in records:
             writer.writerow([record["date"], record["desc"], record["amount"]])
 
 
 if __name__ == "__main__":
     print(
-        """
+        r"""
+      _  _              ____                          _
      | |/ /           / ____|                        | |           
      | ' / __ _ _   _| |     ___  _ ____   _____ _ __| |_ ___ _ __ 
      |  < / _` | | | | |    / _  | '_ \ \ / / _ \ '__| __/ _ \ '__|
