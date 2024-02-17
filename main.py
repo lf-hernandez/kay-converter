@@ -17,7 +17,7 @@ def is_header_line(line):
     return any(keyword in line for keyword in header_keywords)
 
 
-def extract_table_data(extracted_text, table_title):
+def extract_table_data(extracted_text, table_title, category):
     if table_title not in extracted_text:
         return []
     date_pattern = re.compile(r"\d{2}/\d{2}/\d{2}")
@@ -48,13 +48,17 @@ def extract_table_data(extracted_text, table_title):
             date_match = date_pattern.match(line.strip())
             if date_match:
                 if previous_was_date:
-                    temp_records.append({"date": date_match.group(), "desc": ""})
+                    temp_records.append(
+                        {"date": date_match.group(), "desc": "", "category": category}
+                    )
                 else:
                     if temp_records:
                         records.extend(temp_records)
                         temp_records = []
                     previous_was_date = True
-                    temp_records.append({"date": date_match.group(), "desc": ""})
+                    temp_records.append(
+                        {"date": date_match.group(), "desc": "", "category": category}
+                    )
             else:
                 previous_was_date = False
                 if temp_records:
@@ -71,37 +75,42 @@ def extract_table_data(extracted_text, table_title):
     return records
 
 
-def extract_amounts(extracted_text, start_keyword="Amount"):
-    valid_amount_pattern = re.compile(r"-?\d+\.\d{2}")  # Pattern for valid amounts
-    lines = [line for line in extracted_text.split("\n") if line.strip()]
-    amounts_lists = []
-    current_list = []
+def extract_amounts(extracted_text):
+    valid_amount_pattern = re.compile(r"-?\d{1,3}(,\d{3})*\.\d{2}")
+    category_mapping = {
+        "Deposits and other credits": "deposit",
+        "Deposits and other credits - continued": "deposit",
+        "Withdrawals and other debits": "withdrawal",
+        "Withdrawals and other debits - continued": "withdrawal",
+        "Transaction description": "fee",
+    }
+    lines = [line.strip() for line in extracted_text.split("\n") if line.strip()]
+    amounts_with_categories = []
+    current_category = None
     capturing = False
 
     for line in lines:
-        if start_keyword in line:
-            if capturing and current_list:
-                # Append the current list to amounts_lists before starting a new one
-                amounts_lists.append(current_list)
-                current_list = []
+        # Identify the category based on the table title
+        for title, category in category_mapping.items():
+            if title in line:
+                current_category = category
+                capturing = False
+                break
+
+        if "Amount" in line:
             capturing = True
             continue
 
-        if capturing:
-            if valid_amount_pattern.match(line.strip()):
-                current_list.append(line)
-            else:
-                # Stop capturing and append the current list if it has elements
-                if current_list:
-                    amounts_lists.append(current_list)
-                    current_list = []
-                capturing = False
+        if capturing and valid_amount_pattern.match(line):
+            amount = line.replace(",", "")  # Remove commas
+            amounts_with_categories.append((amount, current_category))
+            continue
 
-    # Append the last list if it hasn't been appended yet
-    if current_list:
-        amounts_lists.append(current_list)
+        # Reset capturing if a non-valid amount is encountered
+        if capturing and not valid_amount_pattern.match(line):
+            capturing = False
 
-    return amounts_lists
+    return amounts_with_categories
 
 
 def parse_date(d):
@@ -112,61 +121,76 @@ def process_pdf_files(directory):
     aggregated_deposits_records = []
     aggregated_withdrawals_records = []
     fees = []
+    record_counter = 0  # Add a counter for easier tracking of records
 
     for filename in os.listdir(directory):
         if filename.endswith(".pdf"):
             pdf_path = os.path.join(directory, filename)
             extracted_text = extract_text_from_pdf(pdf_path)
+
+            # Extracting records
             deposits_records = extract_table_data(
-                extracted_text, "Deposits and other credits"
+                extracted_text, "Deposits and other credits", "deposit"
             )
             withdrawals_records = extract_table_data(
-                extracted_text, "Withdrawals and other debits"
+                extracted_text, "Withdrawals and other debits", "withdrawal"
             )
-            withdrawals_records_cont = extract_table_data(
-                extracted_text, "Withdrawals and other debits - continued"
-            )
-            deposits_records_cont = extract_table_data(
-                extracted_text, "Deposits and other credits - continued"
+            fee_records = extract_table_data(
+                extracted_text, "Transaction description", "fee"
             )
 
-            withdrawals_records += withdrawals_records_cont
-            deposits_records += deposits_records_cont
-
-            fee_records = extract_table_data(extracted_text, "Transaction description")
+            # Extracting and categorizing amounts
             amounts = extract_amounts(extracted_text)
-            if len(amounts) == 3:
-                deposits_amounts, withdrawals_amounts, fee_amounts = amounts
-            else:
-                print("Error parsing pdf")
-                sys.exit()
 
-            for i, record in enumerate(deposits_records):
-                if i < len(deposits_amounts):
-                    record["amount"] = deposits_amounts[i]
-                else:
-                    break
+            # Debugging: Print the number of records and amounts
+            print(
+                f"Deposits Records: {len(deposits_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'deposit')}"
+            )
+            print(
+                f"Withdrawals Records: {len(withdrawals_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'withdrawal')}"
+            )
+            print(
+                f"Fee Records: {len(fee_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'fee')}"
+            )
 
-            for i, record in enumerate(withdrawals_records):
-                if i < len(withdrawals_amounts):
-                    record["amount"] = withdrawals_amounts[i]
-                else:
-                    break
+            # Assigning amounts to respective records
+            for amount, category in amounts:
+                if category == "deposit" and deposits_records:
+                    assign_amount_to_record(deposits_records, amount)
+                elif category == "withdrawal" and withdrawals_records:
+                    assign_amount_to_record(withdrawals_records, amount)
+                elif category == "fee" and fee_records:
+                    assign_amount_to_record(fee_records, amount)
 
-            for i, record in enumerate(fee_records):
-                if i < len(fee_amounts):
-                    record["amount"] = fee_amounts[i]
-                else:
-                    break
+            # Aggregating records and adding a counter
+            for record in deposits_records + withdrawals_records + fee_records:
+                record["record_id"] = record_counter
+                record_counter += 1
+                if "amount" not in record:
+                    print(
+                        f"Missing amount in record ID {record['record_id']}: {record}"
+                    )
+                (
+                    aggregated_deposits_records.append(record)
+                    if record["category"] == "deposit"
+                    else None
+                )
+                (
+                    aggregated_withdrawals_records.append(record)
+                    if record["category"] == "withdrawal"
+                    else None
+                )
+                fees.append(record) if record["category"] == "fee" else None
 
-            aggregated_deposits_records.extend(deposits_records)
-            aggregated_withdrawals_records.extend(withdrawals_records)
-            fees.extend(fee_records)
-
-    merged_records = (
-        aggregated_deposits_records + aggregated_withdrawals_records + fee_records
-    )
+    merged_records = aggregated_deposits_records + aggregated_withdrawals_records + fees
     return sorted(merged_records, key=parse_date)
+
+
+def assign_amount_to_record(records, amount):
+    for record in records:
+        if "amount" not in record:
+            record["amount"] = amount
+            break
 
 
 def write_to_csv(records, filename):
@@ -175,7 +199,14 @@ def write_to_csv(records, filename):
         writer.writerow(["Date", "Description", "Amount"])
 
         for record in records:
-            writer.writerow([record["date"], record["desc"], record["amount"]])
+            if "amount" in record:
+                writer.writerow(
+                    [
+                        record.get("date", "N/A"),
+                        record.get("desc", "N/A"),
+                        record["amount"],
+                    ]
+                )
 
 
 if __name__ == "__main__":
