@@ -77,38 +77,34 @@ def extract_table_data(extracted_text, table_title, category):
 
 def extract_amounts(extracted_text):
     valid_amount_pattern = re.compile(r"-?\d{1,3}(,\d{3})*\.\d{2}")
-    category_mapping = {
-        "Deposits and other credits": "deposit",
-        "Deposits and other credits - continued": "deposit",
-        "Withdrawals and other debits": "withdrawal",
-        "Withdrawals and other debits - continued": "withdrawal",
-        "Transaction description": "fee",
-    }
     lines = [line.strip() for line in extracted_text.split("\n") if line.strip()]
     amounts_with_categories = []
-    current_category = None
+    last_amount_index = -1  # Initialize to an invalid index
     capturing = False
 
-    for line in lines:
-        # Identify the category based on the table title
-        for title, category in category_mapping.items():
-            if title in line:
-                current_category = category
-                capturing = False
-                break
-
+    for i, line in enumerate(lines):
         if "Amount" in line:
             capturing = True
+            last_amount_index = len(
+                amounts_with_categories
+            )  # Update index to current length of amounts list
             continue
 
         if capturing and valid_amount_pattern.match(line):
             amount = line.replace(",", "")  # Remove commas
-            amounts_with_categories.append((amount, current_category))
+            category = "withdrawal" if amount.startswith("-") else "deposit"
+            amounts_with_categories.append((amount, category))
             continue
 
-        # Reset capturing if a non-valid amount is encountered
+        # Exit the amount section upon encountering a non-valid amount
         if capturing and not valid_amount_pattern.match(line):
             capturing = False
+
+    # Update the category to 'fee' for the last set of amounts
+    if last_amount_index != -1:
+        for i in range(last_amount_index, len(amounts_with_categories)):
+            amount = amounts_with_categories[i][0]
+            amounts_with_categories[i] = (amount, "fee")
 
     return amounts_with_categories
 
@@ -141,6 +137,7 @@ def process_pdf_files(directory):
 
             # Extracting and categorizing amounts
             amounts = extract_amounts(extracted_text)
+            breakpoint()
 
             # Debugging: Print the number of records and amounts
             print(
