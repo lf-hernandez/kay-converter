@@ -137,7 +137,6 @@ def process_pdf_files(directory):
 
             # Extracting and categorizing amounts
             amounts = extract_amounts(extracted_text)
-            breakpoint()
 
             # Debugging: Print the number of records and amounts
             print(
