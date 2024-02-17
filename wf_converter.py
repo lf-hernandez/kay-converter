@@ -12,6 +12,7 @@ def process_pdf(file_path):
         pandas_options={"header": None},
     )
 
+    df_list = df_list[: len(df_list) - 1]
     df = df_list[0]
 
     columns = [
