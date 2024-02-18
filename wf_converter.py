@@ -48,14 +48,6 @@ def process_pdf(file_path):
     return df
 
 
-pdf_files = [f for f in os.listdir(".") if f.endswith(".pdf")]
-
-all_data = pd.DataFrame()
-for file in pdf_files:
-    df = process_pdf(file)
-    all_data = pd.concat([all_data, df], ignore_index=True)
-
-
 def standardize_date(date_str):
     if pd.isna(date_str) or date_str == "":
         return None
@@ -65,6 +57,13 @@ def standardize_date(date_str):
     return pd.to_datetime(full_date_str, format="%m/%d/%Y", errors="coerce")
 
 
+pdf_files = [f for f in os.listdir(".") if f.endswith(".pdf")]
+
+all_data = pd.DataFrame()
+for file in pdf_files:
+    df = process_pdf(file)
+    all_data = pd.concat([all_data, df], ignore_index=True)
+    
 all_data["Date"] = all_data["Date"].apply(standardize_date)
 all_data.sort_values(by="Date", inplace=True)
 
