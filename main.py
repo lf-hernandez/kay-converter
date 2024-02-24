@@ -21,6 +21,7 @@ def extract_table_data(extracted_text, table_title, category):
     if table_title not in extracted_text:
         return []
     date_pattern = re.compile(r"\d{2}/\d{2}/\d{2}")
+    card_number_pattern = re.compile(r"X{12}\d{4}(\s+X{4}){3}")
     capturing = False
     records = []
     temp_records = []
@@ -46,6 +47,9 @@ def extract_table_data(extracted_text, table_title, category):
 
         if capturing and not is_header_line(line):
             date_match = date_pattern.match(line.strip())
+            cc_match = card_number_pattern.search(line.strip())
+            if cc_match and "CHECKCARD" not in line:
+                continue
             if date_match:
                 if previous_was_date:
                     temp_records.append(
@@ -61,16 +65,24 @@ def extract_table_data(extracted_text, table_title, category):
                     )
             else:
                 previous_was_date = False
-                breakpoint()
+
                 if temp_records:
                     if len(temp_records) > 1:
-                        if "DES:" in line and temp_records[0]["desc"]:
+                        if (
+                            "DES:" in line or "CHECKCARD" in line or "CKCD" in line
+                        ) and temp_records[0]["desc"]:
                             curr_temp_record += 1
 
-                        if "DES:" in line:
-                            temp_records[curr_temp_record]["desc"] += line.strip() + " "
+                        if "DES:" in line or "CHECKCARD" in line or "CKCD" in line:
+                            temp_records[curr_temp_record]["desc"] += line.strip()
                     else:
-                        temp_records[0]["desc"] += line.strip() + " "
+                        temp_records[0]["desc"] += line.strip()
+
+                    if curr_temp_record >= len(temp_records):
+                        records.extend(temp_records)
+                        temp_records = []
+                        curr_temp_record = 0
+
                 elif records:
                     records[-1]["desc"] += line.strip() + " "
 
