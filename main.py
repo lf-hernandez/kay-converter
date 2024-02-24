@@ -28,6 +28,7 @@ def extract_table_data(extracted_text, table_title, category):
     curr_temp_record = 0
 
     lines = [line for line in extracted_text.split("\n") if line.strip()]
+    lines = lines[lines.index("Page 2 of 6") :]
 
     for i, line in enumerate(lines):
         if table_title == "Transaction description":
@@ -61,12 +62,14 @@ def extract_table_data(extracted_text, table_title, category):
                     )
             else:
                 previous_was_date = False
+
                 if temp_records:
                     if len(temp_records) > 1:
                         if "DES:" in line and temp_records[0]["desc"]:
                             curr_temp_record += 1
 
-                        temp_records[curr_temp_record]["desc"] += line.strip() + " "
+                        if "DES:" in line:
+                            temp_records[curr_temp_record]["desc"] += line.strip() + " "
                     else:
                         temp_records[0]["desc"] += line.strip() + " "
                 elif records:
