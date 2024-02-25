@@ -22,13 +22,9 @@ def preprocess_df(df_list):
     if not df_list or len(df_list) <= 1:
         return pd.DataFrame()
 
-    # Concatenate all but the last DataFrame
     df = pd.concat(df_list[:-1])
-
-    # Drop rows where all elements are NaN
     df.dropna(how="all", inplace=True)
 
-    # Define columns based on expected format
     columns = [
         "Date",
         "Description",
@@ -36,39 +32,28 @@ def preprocess_df(df_list):
         "Withdrawals/Debits",
         "Ending daily balance",
     ]
-
-    # Adjust columns based on actual data format
     if len(df.columns) == 6:
         columns.insert(1, "Check Number")
-
     df.columns = columns
 
-    # Remove commas and convert to numeric
-    df["Deposits/Credits"] = df["Deposits/Credits"].replace({",": ""}, regex=True)
-    df["Withdrawals/Debits"] = df["Withdrawals/Debits"].replace({",": ""}, regex=True)
-    df["Deposits/Credits"] = pd.to_numeric(
-        df["Deposits/Credits"], errors="coerce"
-    ).fillna(0)
-    df["Withdrawals/Debits"] = pd.to_numeric(
-        df["Withdrawals/Debits"], errors="coerce"
-    ).fillna(0)
+    # Convert to numeric and handle errors
+    for col in ["Deposits/Credits", "Withdrawals/Debits"]:
+        df[col] = df[col].replace({",": ""}, regex=True)
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    # Calculate new Amount column
     df["Amount"] = df["Deposits/Credits"] - df["Withdrawals/Debits"]
-
-    # Select only the needed columns
     df = df[["Date", "Description", "Amount"]]
 
-    # Processing for word-wrapped lines
+    # Handle word-wrapped lines
     indices_to_drop = []
-    for i in range(len(df) - 1, -1, -1):
-        if pd.isna(df.at[i, "Date"]) or df.at[i, "Date"] == "":
-            if i > 0:  # Check to ensure index i-1 exists
-                df.at[i - 1, "Description"] += " " + df.at[i, "Description"]
+    for i, row in df[::-1].iterrows():
+        if pd.isna(row["Date"]) or row["Date"] == "":
+            if i > 0 and i - 1 in df.index:
+                df.at[i - 1, "Description"] += " " + row["Description"]
             indices_to_drop.append(i)
+
     df.drop(indices_to_drop, inplace=True)
     df.reset_index(drop=True, inplace=True)
-
     return df
 
 
