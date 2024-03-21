@@ -1,20 +1,95 @@
-import os
 import re
 import csv
-import sys
 from datetime import datetime
 from pdfminer.high_level import extract_text
 from pdfminer.layout import LAParams
 
 
+def convert_bank_of_america(files):
+    records = process_pdf_files(files)
+    csv_content = generate_csv_content(records)
+    return csv_content
+
+
+def generate_csv_content(records):
+    csv_content = ""
+    csv_content += "Date,Description,Amount\n"
+    for record in records:
+        csv_content += f"{record.get('date', 'N/A')},{record.get('desc', 'N/A')},{record.get('amount', 'N/A')}\n"
+    return csv_content
+
+
+def process_pdf_files(files):
+    aggregated_deposits_records = []
+    aggregated_withdrawals_records = []
+    fees = []
+    record_counter = 0  # Add a counter for easier tracking of records
+
+    for filename in files:
+        if filename.endswith(".pdf"):
+            extracted_text = extract_text_from_pdf(filename)
+
+            # Extracting records
+            deposits_records = extract_table_data(
+                extracted_text, "Deposits and other credits", "deposit"
+            )
+            withdrawals_records = extract_table_data(
+                extracted_text, "Withdrawals and other debits", "withdrawal"
+            )
+            fee_records = extract_table_data(
+                extracted_text, "Transaction description", "fee"
+            )
+
+            # Extracting and categorizing amounts
+            amounts = extract_amounts(extracted_text)
+
+            # Debugging: Print the number of records and amounts
+            print(
+                f"Deposits Records: {len(deposits_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'deposit')}"
+            )
+            print(
+                f"Withdrawals Records: {len(withdrawals_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'withdrawal')}"
+            )
+            print(
+                f"Fee Records: {len(fee_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'fee')}"
+            )
+
+            # Assigning amounts to respective records
+            for amount, category in amounts:
+                if category == "deposit" and deposits_records:
+                    assign_amount_to_record(deposits_records, amount)
+                elif category == "withdrawal" and withdrawals_records:
+                    assign_amount_to_record(withdrawals_records, amount)
+                elif category == "fee" and fee_records:
+                    assign_amount_to_record(fee_records, amount)
+
+            # Aggregating records and adding a counter
+            for record in deposits_records + withdrawals_records + fee_records:
+                record["record_id"] = record_counter
+                record_counter += 1
+                if "amount" not in record:
+                    print(
+                        f"Missing amount in record ID {record['record_id']}: {record}"
+                    )
+                (
+                    aggregated_deposits_records.append(record)
+                    if record["category"] == "deposit"
+                    else None
+                )
+                (
+                    aggregated_withdrawals_records.append(record)
+                    if record["category"] == "withdrawal"
+                    else None
+                )
+                fees.append(record) if record["category"] == "fee" else None
+
+    merged_records = aggregated_deposits_records + aggregated_withdrawals_records + fees
+    return sorted(merged_records, key=parse_date)
+
+
 def extract_text_from_pdf(pdf_path):
     with open(pdf_path, "rb") as file:
         return extract_text(file, laparams=LAParams())
-
-
-def is_header_line(line):
-    header_keywords = ["Date", "Description", "Amount", "Transaction description"]
-    return any(keyword in line for keyword in header_keywords)
 
 
 def extract_table_data(extracted_text, table_title, category):
@@ -89,6 +164,11 @@ def extract_table_data(extracted_text, table_title, category):
     return records
 
 
+def is_header_line(line):
+    header_keywords = ["Date", "Description", "Amount", "Transaction description"]
+    return any(keyword in line for keyword in header_keywords)
+
+
 def extract_amounts(extracted_text):
     valid_amount_pattern = re.compile(r"-?\d{1,3}(,\d{3})*\.\d{2}")
     lines = [line.strip() for line in extracted_text.split("\n") if line.strip()]
@@ -127,75 +207,6 @@ def parse_date(d):
     return datetime.strptime(d["date"], "%m/%d/%y")
 
 
-def process_pdf_files(directory):
-    aggregated_deposits_records = []
-    aggregated_withdrawals_records = []
-    fees = []
-    record_counter = 0  # Add a counter for easier tracking of records
-
-    for filename in os.listdir(directory):
-        if filename.endswith(".pdf"):
-            pdf_path = os.path.join(directory, filename)
-            extracted_text = extract_text_from_pdf(pdf_path)
-
-            # Extracting records
-            deposits_records = extract_table_data(
-                extracted_text, "Deposits and other credits", "deposit"
-            )
-            withdrawals_records = extract_table_data(
-                extracted_text, "Withdrawals and other debits", "withdrawal"
-            )
-            fee_records = extract_table_data(
-                extracted_text, "Transaction description", "fee"
-            )
-
-            # Extracting and categorizing amounts
-            amounts = extract_amounts(extracted_text)
-
-            # Debugging: Print the number of records and amounts
-            print(
-                f"Deposits Records: {len(deposits_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'deposit')}"
-            )
-            print(
-                f"Withdrawals Records: {len(withdrawals_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'withdrawal')}"
-            )
-            print(
-                f"Fee Records: {len(fee_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'fee')}"
-            )
-
-            # Assigning amounts to respective records
-            for amount, category in amounts:
-                if category == "deposit" and deposits_records:
-                    assign_amount_to_record(deposits_records, amount)
-                elif category == "withdrawal" and withdrawals_records:
-                    assign_amount_to_record(withdrawals_records, amount)
-                elif category == "fee" and fee_records:
-                    assign_amount_to_record(fee_records, amount)
-
-            # Aggregating records and adding a counter
-            for record in deposits_records + withdrawals_records + fee_records:
-                record["record_id"] = record_counter
-                record_counter += 1
-                if "amount" not in record:
-                    print(
-                        f"Missing amount in record ID {record['record_id']}: {record}"
-                    )
-                (
-                    aggregated_deposits_records.append(record)
-                    if record["category"] == "deposit"
-                    else None
-                )
-                (
-                    aggregated_withdrawals_records.append(record)
-                    if record["category"] == "withdrawal"
-                    else None
-                )
-                fees.append(record) if record["category"] == "fee" else None
-
-    merged_records = aggregated_deposits_records + aggregated_withdrawals_records + fees
-    return sorted(merged_records, key=parse_date)
-
-
 def assign_amount_to_record(records, amount):
     for record in records:
         if "amount" not in record:
@@ -217,7 +228,3 @@ def write_to_csv(records, filename):
                         record["amount"],
                     ]
                 )
-
-
-def convert_bank_of_america(files):
-    process_pdf_files(files)
