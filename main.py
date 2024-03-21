@@ -1,249 +1,171 @@
+import tkinter as tk
+from tkinter import ttk
+from tkinter import filedialog
 import os
-import re
-import csv
-import sys
-from datetime import datetime
-from pdfminer.high_level import extract_text
-from pdfminer.layout import LAParams
+import PyPDF2
+import datetime
+
+from boa_converter import convert_bank_of_america
+from wf_converter import convert_wells_fargo
+
+selected_files = []
 
 
-def extract_text_from_pdf(pdf_path):
-    with open(pdf_path, "rb") as file:
-        return extract_text(file, laparams=LAParams())
-
-
-def is_header_line(line):
-    header_keywords = ["Date", "Description", "Amount", "Transaction description"]
-    return any(keyword in line for keyword in header_keywords)
-
-
-def extract_table_data(extracted_text, table_title, category):
-    if table_title not in extracted_text:
-        return []
-    date_pattern = re.compile(r"\d{2}/\d{2}/\d{2}")
-    card_number_pattern = re.compile(r"X{12}\d{4}(\s+X{4}){3}")
-    capturing = False
-    records = []
-    temp_records = []
-    previous_was_date = False
-    curr_temp_record = 0
-
-    lines = [line for line in extracted_text.split("\n") if line.strip()]
-
-    for i, line in enumerate(lines):
-        if table_title == "Transaction description":
-            if "Date" in line and i < len(lines) - 1 and table_title in lines[i + 1]:
-                capturing = True
-                continue
-        elif i < len(lines) - 1 and table_title in line and lines[i + 1] == "Date":
-            capturing = True
-            continue
-
-        if "Total" in line and capturing:
-            if temp_records:
-                records.extend(temp_records)
-            capturing = False
-            continue
-
-        if capturing and not is_header_line(line):
-            date_match = date_pattern.match(line.strip())
-            cc_match = card_number_pattern.search(line.strip())
-            if cc_match and "CHECKCARD" not in line:
-                continue
-            if date_match:
-                if previous_was_date:
-                    temp_records.append(
-                        {"date": date_match.group(), "desc": "", "category": category}
-                    )
-                else:
-                    if temp_records:
-                        records.extend(temp_records)
-                        temp_records = []
-                    previous_was_date = True
-                    temp_records.append(
-                        {"date": date_match.group(), "desc": "", "category": category}
-                    )
-            else:
-                previous_was_date = False
-
-                if temp_records:
-                    if len(temp_records) > 1:
-                        if (
-                            "DES:" in line or "CHECKCARD" in line or "CKCD" in line
-                        ) and temp_records[0]["desc"]:
-                            curr_temp_record += 1
-
-                        if "DES:" in line or "CHECKCARD" in line or "CKCD" in line:
-                            temp_records[curr_temp_record]["desc"] += line.strip()
-                    else:
-                        temp_records[0]["desc"] += line.strip()
-
-                    if curr_temp_record >= len(temp_records):
-                        records.extend(temp_records)
-                        temp_records = []
-                        curr_temp_record = 0
-
-                elif records:
-                    records[-1]["desc"] += line.strip() + " "
-
-    return records
-
-
-def extract_amounts(extracted_text):
-    valid_amount_pattern = re.compile(r"-?\d{1,3}(,\d{3})*\.\d{2}")
-    lines = [line.strip() for line in extracted_text.split("\n") if line.strip()]
-    amounts_with_categories = []
-    last_amount_index = -1  # Initialize to an invalid index
-    capturing = False
-
-    for i, line in enumerate(lines):
-        if "Amount" in line:
-            capturing = True
-            last_amount_index = len(
-                amounts_with_categories
-            )  # Update index to current length of amounts list
-            continue
-
-        if capturing and valid_amount_pattern.match(line):
-            amount = line.replace(",", "")  # Remove commas
-            category = "withdrawal" if amount.startswith("-") else "deposit"
-            amounts_with_categories.append((amount, category))
-            continue
-
-        # Exit the amount section upon encountering a non-valid amount
-        if capturing and not valid_amount_pattern.match(line):
-            capturing = False
-
-    # Update the category to 'fee' for the last set of amounts
-    if last_amount_index != -1:
-        for i in range(last_amount_index, len(amounts_with_categories)):
-            amount = amounts_with_categories[i][0]
-            amounts_with_categories[i] = (amount, "fee")
-
-    return amounts_with_categories
-
-
-def parse_date(d):
-    return datetime.strptime(d["date"], "%m/%d/%y")
-
-
-def process_pdf_files(directory):
-    aggregated_deposits_records = []
-    aggregated_withdrawals_records = []
-    fees = []
-    record_counter = 0  # Add a counter for easier tracking of records
-
-    for filename in os.listdir(directory):
-        if filename.endswith(".pdf"):
-            pdf_path = os.path.join(directory, filename)
-            extracted_text = extract_text_from_pdf(pdf_path)
-
-            # Extracting records
-            deposits_records = extract_table_data(
-                extracted_text, "Deposits and other credits", "deposit"
-            )
-            withdrawals_records = extract_table_data(
-                extracted_text, "Withdrawals and other debits", "withdrawal"
-            )
-            fee_records = extract_table_data(
-                extracted_text, "Transaction description", "fee"
-            )
-
-            # Extracting and categorizing amounts
-            amounts = extract_amounts(extracted_text)
-
-            # Debugging: Print the number of records and amounts
-            print(
-                f"Deposits Records: {len(deposits_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'deposit')}"
-            )
-            print(
-                f"Withdrawals Records: {len(withdrawals_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'withdrawal')}"
-            )
-            print(
-                f"Fee Records: {len(fee_records)}, Amounts: {sum(1 for a in amounts if a[1] == 'fee')}"
-            )
-
-            # Assigning amounts to respective records
-            for amount, category in amounts:
-                if category == "deposit" and deposits_records:
-                    assign_amount_to_record(deposits_records, amount)
-                elif category == "withdrawal" and withdrawals_records:
-                    assign_amount_to_record(withdrawals_records, amount)
-                elif category == "fee" and fee_records:
-                    assign_amount_to_record(fee_records, amount)
-
-            # Aggregating records and adding a counter
-            for record in deposits_records + withdrawals_records + fee_records:
-                record["record_id"] = record_counter
-                record_counter += 1
-                if "amount" not in record:
-                    print(
-                        f"Missing amount in record ID {record['record_id']}: {record}"
-                    )
-                (
-                    aggregated_deposits_records.append(record)
-                    if record["category"] == "deposit"
-                    else None
-                )
-                (
-                    aggregated_withdrawals_records.append(record)
-                    if record["category"] == "withdrawal"
-                    else None
-                )
-                fees.append(record) if record["category"] == "fee" else None
-
-    merged_records = aggregated_deposits_records + aggregated_withdrawals_records + fees
-    return sorted(merged_records, key=parse_date)
-
-
-def assign_amount_to_record(records, amount):
-    for record in records:
-        if "amount" not in record:
-            record["amount"] = amount
-            break
-
-
-def write_to_csv(records, filename):
-    with open(filename, "w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(["Date", "Description", "Amount"])
-
-        for record in records:
-            if "amount" in record:
-                writer.writerow(
-                    [
-                        record.get("date", "N/A"),
-                        record.get("desc", "N/A"),
-                        record["amount"],
-                    ]
-                )
-
-
-if __name__ == "__main__":
-    print(
-        r"""
-      _  _              ____                          _
-     | |/ /           / ____|                        | |           
-     | ' / __ _ _   _| |     ___  _ ____   _____ _ __| |_ ___ _ __ 
-     |  < / _` | | | | |    / _  | '_ \ \ / / _ \ '__| __/ _ \ '__|
-     | . \ (_| | |_| | |___| (_) | | | \ V /  __/ |  | ||  __/ |   
-     |_|\_\__,_|\__, |\_____\___/|_| |_|\_/ \___|_|   \__\___|_|   
-                 __/ |                                             
-                |___/                                     
-          """
+def get_selected_files(frame, convert_button):
+    files = filedialog.askopenfiles(
+        title="Select files", initialdir="/", filetypes=[("PDF files", "*.pdf")]
     )
-    print("@Author: Luis Felipe Hernandez")
-    print("Processing bank statements...")
+    if files:
+        render_files(frame, files, convert_button)
 
-    if getattr(sys, "frozen", False):
-        script_directory = os.path.dirname(sys.executable)
+
+def render_files(frame, files, convert_button):
+    column_headers = False
+    file_info_frames = []
+
+    if not column_headers:
+        create_column_headers(frame)
+        column_headers = True
+
+    for i, file in enumerate(files):
+        filename = os.path.basename(file.name)
+        file_size = os.path.getsize(file.name)
+        num_pages = get_num_pages(file.name)
+        date_created = get_date_created(file.name)
+
+        file_frame = ttk.Frame(frame)
+        file_frame.grid(column=1, row=i + 3, sticky="w", padx=10, pady=5)
+
+        ttk.Label(
+            file_frame, text=filename[:27] + (filename[27:] and "..."), width=30
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(file_frame, text=format_size(file_size), width=10).grid(
+            row=0, column=1, sticky="w"
+        )
+        ttk.Label(file_frame, text=num_pages, width=10).grid(
+            row=0, column=2, sticky="w"
+        )
+        ttk.Label(
+            file_frame, text=get_date_created_display(date_created), width=15
+        ).grid(row=0, column=3, sticky="w")
+
+        remove_button = ttk.Button(
+            file_frame,
+            text="❌",
+            command=lambda row=i, f=file_frame: remove_file(
+                f, file_info_frames, selected_files, row
+            ),
+        )
+        remove_button.grid(row=0, column=4, padx=(10, 0), sticky="w")
+
+        file_info_frames.append(file_frame)
+        selected_files.append(file)
+
+    convert_button.grid(column=1, row=len(files) + 4, padx=10, pady=10, sticky="e")
+
+
+def create_column_headers(frame):
+    header_frame = ttk.Frame(frame)
+    header_frame.grid(column=1, row=2, sticky="w", padx=10, pady=5)
+
+    filename_header = ttk.Label(header_frame, text="Filename", width=30)
+    filename_header.grid(row=0, column=0, sticky="w")
+
+    size_header = ttk.Label(header_frame, text="Size", width=10)
+    size_header.grid(row=0, column=1, sticky="w")
+
+    pages_header = ttk.Label(header_frame, text="Pages", width=10)
+    pages_header.grid(row=0, column=2, sticky="w")
+
+    date_header = ttk.Label(header_frame, text="Date Created", width=15)
+    date_header.grid(row=0, column=3, sticky="w")
+
+    remove_header = ttk.Label(header_frame, text="Remove", width=15)
+    remove_header.grid(row=0, column=4, sticky="w")
+
+
+def get_num_pages(file_path):
+    with open(file_path, "rb") as f:
+        pdf_reader = PyPDF2.PdfReader(f)
+        num_pages = len(pdf_reader.pages)
+    return num_pages
+
+
+def get_date_created(file_path):
+    creation_time = os.path.getctime(file_path)
+    return datetime.datetime.fromtimestamp(creation_time)
+
+
+def get_date_created_display(timestamp):
+    return timestamp.strftime("%Y-%m-%d")
+
+
+def format_size(size_in_bytes):
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size_in_bytes < 1024.0:
+            return f"{size_in_bytes:.2f} {unit}"
+        size_in_bytes /= 1024.0
+    return ""
+
+
+def remove_file(file_frame, file_info_frames, selected_files, row):
+    file_frame.destroy()
+    file_info_frames.pop(row)
+    selected_files.pop(row)
+
+
+root = tk.Tk()
+frame = ttk.Frame(root, padding=10)
+frame.grid()
+
+root.title("Kay Converter")
+
+window_width = 800
+window_height = 600
+screen_width = root.winfo_screenwidth()
+screen_height = root.winfo_screenheight()
+x_position = (screen_width - window_width) // 2
+y_position = (screen_height - window_height) // 2
+
+root.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+
+bank_label = ttk.Label(frame, text="Select Bank:")
+bank_label.grid(
+    column=1, row=1, padx=(10, 0), pady=5, sticky="w"
+)  # Adjust left padding and make sticky="w"
+bank_options = ["Bank of America", "Wells Fargo"]
+bank_var = tk.StringVar()
+bank_dropdown = ttk.Combobox(
+    frame, values=bank_options, textvariable=bank_var, state="readonly"
+)  # Set state to readonly
+bank_dropdown.grid(column=2, row=1, padx=10, pady=5)
+bank_dropdown.current(0)
+
+window_label = ttk.Label(frame, text="Select PDF Bank Statements")
+window_label.grid(column=1, row=2, padx=10, pady=10)
+
+action_button = ttk.Button(
+    frame, text="Browse", command=lambda: get_selected_files(frame, convert_button)
+)
+action_button.grid(column=3, row=2, padx=10, pady=10)
+
+
+def convert_pdfs_to_csv():
+    bank = bank_var.get()
+    files = selected_files
+    if bank == "Bank of America":
+        convert_bank_of_america(files)
+    elif bank == "Wells Fargo":
+        convert_wells_fargo(files)
     else:
-        script_directory = os.path.dirname(os.path.realpath(__file__))
+        print("Unknown bank selected!")
 
-    os.chdir(script_directory)
 
-    directory = "."
-    aggregated_records = process_pdf_files(directory)
+convert_button = ttk.Button(
+    frame, text="Convert PDFs to CSV", command=convert_pdfs_to_csv
+)
+convert_button.grid(
+    column=1, row=len(selected_files) + 4, padx=10, pady=10, sticky="e"
+)
 
-    write_to_csv(aggregated_records, "aggregated_records.csv")
-    print("Process complete.\nCSV file generated: aggregated_records.csv")
+root.mainloop()

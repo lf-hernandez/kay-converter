@@ -18,11 +18,11 @@ def read_pdf_to_df(file_path):
         return []
 
 
-def preprocess_df(df_list):
-    if not df_list or len(df_list) <= 1:
+def preprocess_df(df):
+    if not df or len(df) <= 1:
         return pd.DataFrame()
-
-    df = pd.concat(df_list[:-1])
+    breakpoint()
+    df = pd.concat(df[:-1])
     df.dropna(how="all", inplace=True)
 
     columns = [
@@ -79,14 +79,7 @@ def aggregate_pdf_data(pdf_files):
     return all_data
 
 
-def main():
-    pdf_files = [f for f in os.listdir(".") if f.endswith(".pdf")]
-    all_data = aggregate_pdf_data(pdf_files)
-
+def convert_wells_fargo(files):
+    all_data = aggregate_pdf_data(files)
     csv_file_path = "aggregated_data.csv"
     all_data.to_csv(csv_file_path, index=False)
-    print(f"Data aggregated and written to {csv_file_path}")
-
-
-if __name__ == "__main__":
-    main()
