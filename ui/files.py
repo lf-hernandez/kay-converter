@@ -1,7 +1,7 @@
 import os
 import datetime
-from tkinter import filedialog
 import tkinter.ttk as ttk
+from tkinter import filedialog
 from PyPDF2 import PdfReader
 
 from converters.boa_converter import convert_bank_of_america
@@ -22,6 +22,7 @@ def get_pdf_files(frame, convert_button, browse_files_button):
 def render_files(frame, files, convert_button, browse_files_button):
     is_header_rendered = False
     file_info_frames = []
+    header_frame = None
 
     if not is_header_rendered:
         header_frame = create_column_headers(frame)
@@ -34,7 +35,7 @@ def render_files(frame, files, convert_button, browse_files_button):
         date_created = get_date_created(file.name)
 
         file_frame = ttk.Frame(frame)
-        file_frame.grid(column=1, row=i + 4, sticky="w", padx=10, pady=5)
+        file_frame.grid(row=i + 3, column=0, sticky="w", padx=10, pady=5)
 
         ttk.Label(
             file_frame, text=filename[:27] + (filename[27:] and "..."), width=30
@@ -63,20 +64,20 @@ def render_files(frame, files, convert_button, browse_files_button):
                 browse_files_button,
             ),
         )
-        remove_button.grid(row=0, column=4, padx=(10, 0), sticky="w")
+        remove_button.grid(row=0, column=4, padx=10, sticky="w")
 
         file_info_frames.append(file_frame)
         selected_files.append(file.name)
 
     if files:
-        convert_button.grid(column=1, row=len(files) + 5, padx=10, pady=10, sticky="e")
+        convert_button.grid(row=len(files) + 4, column=0, padx=10, pady=10, sticky="e")
     else:
         convert_button.grid_forget()
 
 
 def create_column_headers(frame):
     header_frame = ttk.Frame(frame)
-    header_frame.grid(column=1, row=3, sticky="w", padx=10, pady=5)
+    header_frame.grid(row=2, column=0, sticky="w", padx=10, pady=5)
 
     filename_header = ttk.Label(header_frame, text="Filename", width=30)
     filename_header.grid(row=0, column=0, sticky="w")
@@ -160,8 +161,9 @@ def save_csv_file(frame, init_widgets, csv_content):
 def convert_pdfs_to_csv(
     frame, convert_button, progress_bar, selected_bank, save_button
 ):
+    csv_content = None
     progress_bar.grid(
-        column=2, row=len(selected_files) + 6, padx=10, pady=10, sticky="w"
+        row=len(selected_files) + 5, column=0, padx=10, pady=10, sticky="w"
     )
     convert_button.config(state="disabled")
     progress_bar.start()
@@ -171,24 +173,21 @@ def convert_pdfs_to_csv(
 
     if bank_svar == "Bank of America":
         csv_content = convert_bank_of_america(files)
-        show_conversion_success(frame)
     elif bank_svar == "Wells Fargo":
-        convert_wells_fargo(files)
-        show_conversion_success(frame)
-    else:
-        print("Unknown bank selected!")
-
+        csv_content = convert_wells_fargo(files)
+    
     progress_bar.stop()
+    show_conversion_success(frame)
     convert_button.config(state="enabled")
 
     if csv_content:
         save_button.grid(
-            row=len(selected_files) + 7,
+            row=len(selected_files) + 6,
             column=0,
             columnspan=3,
             padx=10,
             pady=10,
-            sticky="w",
+            sticky="e",
         )
     else:
         save_button.grid_forget()
@@ -201,5 +200,5 @@ def show_conversion_success(frame):
         frame, text="PDFs successfully converted!", foreground="green"
     )
     success_label.grid(
-        column=1, row=len(selected_files) + 6, padx=10, pady=10, sticky="e"
+         row=len(selected_files) + 5, column=0, padx=10, pady=10, sticky="e"
     )

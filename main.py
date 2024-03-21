@@ -17,17 +17,17 @@ def main():
         f"{window_width}x{window_height}+{window_x_position}+{window_y_position}"
     )
 
-    root_frame = ttk.Frame(window, padding=10)
+    root_frame = ttk.Frame(window, padding=10, relief=tk.RAISED, border=1)
     root_frame.grid()
 
-    prompt_frame = ttk.Frame(root_frame)
-    prompt_frame.grid(row=1, column=1)
+    prompt_frame = ttk.Frame(root_frame, relief=tk.RAISED, border=2)
+    prompt_frame.grid(sticky="w")
 
-    results_frame = ttk.Frame(root_frame)
-    results_frame.grid(row=2, column=1)
+    results_frame = ttk.Frame(root_frame, relief=tk.RAISED, border=2)
+    results_frame.grid(sticky="w")
 
     bank_label = ttk.Label(master=prompt_frame, text="Select Bank:")
-    bank_label.grid(column=1, row=1, padx=(10, 0), pady=5, sticky="w")
+    bank_label.grid(row=0, column=0, padx=10, pady=5, sticky="w")
     bank_options = ["Bank of America", "Wells Fargo"]
     bank_str_var = tk.StringVar()
     bank_dropdown = ttk.Combobox(
@@ -36,21 +36,21 @@ def main():
         textvariable=bank_str_var,
         state="readonly",
     )
-    bank_dropdown.grid(column=2, row=1, padx=10, pady=5, sticky="w")
+    bank_dropdown.grid(row=0, column=1, padx=10, pady=5, sticky="w")
     bank_dropdown.current(0)
 
     browse_files_label = ttk.Label(
         master=prompt_frame, text="Select PDF Bank Statements"
     )
-    browse_files_label.grid(column=1, row=2, padx=10, pady=10, sticky="w")
+    browse_files_label.grid(row=1, column=0, padx=10, pady=10, sticky="w")
     browse_files_button = ttk.Button(
         master=prompt_frame,
         text="Browse",
         command=lambda: get_pdf_files(
-            prompt_frame, convert_button, browse_files_button
+            results_frame, convert_button, browse_files_button
         ),
     )
-    browse_files_button.grid(column=3, row=2, padx=10, pady=10, sticky="e")
+    browse_files_button.grid(row=1, column=1, padx=10, pady=10, sticky="w")
 
     convert_button = ttk.Button(
         master=results_frame,
@@ -65,7 +65,7 @@ def main():
     )
 
     conversion_progress_bar = ttk.Progressbar(
-        results_frame, orient="horizontal", length=200, mode="determinate"
+        results_frame, orient="horizontal", length=600, mode="determinate"
     )
 
     save_button = ttk.Button(
