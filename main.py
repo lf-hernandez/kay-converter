@@ -178,11 +178,11 @@ def convert_pdfs_to_csv():
     if csv_content:
         save_button.grid(
             row=len(selected_files) + 6,
-            column=1,
+            column=0,
             columnspan=3,
             padx=10,
             pady=10,
-            sticky="e",
+            sticky="w",
         )
         return csv_content
     else:
